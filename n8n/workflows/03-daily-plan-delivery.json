@@ -1,0 +1,97 @@
+{
+  "name": "03 — Daily Plan Delivery",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 7 * * *" }]
+        }
+      },
+      "id": "cron-daily-morning",
+      "name": "Every Day 7:00 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300],
+      "notes": "Adjusts per user timezone via backend"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL }}/api/v1/notifications/daily-plan-batch",
+        "method": "GET",
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-N8N-Secret", "value": "={{ $env.N8N_INTERNAL_SECRET }}" }
+          ]
+        },
+        "options": { "timeout": 30000 }
+      },
+      "id": "get-daily-plans",
+      "name": "Get Daily Plans for All Users",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [440, 300],
+      "notes": "Backend returns [{telegram_id, plan_summary}] for users whose local time is ~7AM"
+    },
+    {
+      "parameters": { "batchSize": 20, "options": { "reset": false } },
+      "id": "batch-send",
+      "name": "Batch (20 users)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [660, 300],
+      "notes": "Telegram rate limit: max 30 msg/s. Batch 20 with 1s delay."
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.telegram_id, text: $json.plan_summary, parse_mode: 'HTML' }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "send-daily-plan",
+      "name": "Send Daily Plan",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [880, 300]
+    },
+    {
+      "parameters": { "amount": 1, "unit": "seconds" },
+      "id": "wait-rate-limit",
+      "name": "Wait 1s (Rate Limit)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1100, 300]
+    }
+  ],
+  "connections": {
+    "Every Day 7:00 AM": {
+      "main": [
+        [{ "node": "Get Daily Plans for All Users", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Daily Plans for All Users": {
+      "main": [
+        [{ "node": "Batch (20 users)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Batch (20 users)": {
+      "main": [
+        [{ "node": "Send Daily Plan", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Daily Plan": {
+      "main": [
+        [{ "node": "Wait 1s (Rate Limit)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Wait 1s (Rate Limit)": {
+      "main": [
+        [{ "node": "Batch (20 users)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "cron" }, { "name": "daily" }, { "name": "plans" }]
+}

@@ -1,0 +1,85 @@
+{
+  "name": "07 — Sleep Quality Morning Ask",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 8 * * *" }]
+        }
+      },
+      "id": "cron-morning",
+      "name": "Daily 8:00 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL }}/api/v1/notifications/morning-sleep-batch",
+        "method": "GET",
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-N8N-Secret", "value": "={{ $env.N8N_INTERNAL_SECRET }}" }
+          ]
+        },
+        "options": { "timeout": 15000 }
+      },
+      "id": "get-users-for-sleep",
+      "name": "Get Users for Sleep Ask",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [440, 300],
+      "notes": "Returns users whose local time is ~8AM and haven't logged sleep today"
+    },
+    {
+      "parameters": { "batchSize": 20, "options": {} },
+      "id": "batch",
+      "name": "Batch (20)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.telegram_id, text: '☀️ Buenos días. ¿Cómo dormiste? (horas y calidad del 1 al 5)', parse_mode: 'HTML' }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "send-sleep-ask",
+      "name": "Ask Sleep Quality",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [880, 300]
+    },
+    {
+      "parameters": { "amount": 1, "unit": "seconds" },
+      "id": "wait",
+      "name": "Wait 1s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1100, 300]
+    }
+  ],
+  "connections": {
+    "Daily 8:00 AM": {
+      "main": [[{ "node": "Get Users for Sleep Ask", "type": "main", "index": 0 }]]
+    },
+    "Get Users for Sleep Ask": {
+      "main": [[{ "node": "Batch (20)", "type": "main", "index": 0 }]]
+    },
+    "Batch (20)": {
+      "main": [[{ "node": "Ask Sleep Quality", "type": "main", "index": 0 }]]
+    },
+    "Ask Sleep Quality": {
+      "main": [[{ "node": "Wait 1s", "type": "main", "index": 0 }]]
+    },
+    "Wait 1s": {
+      "main": [[{ "node": "Batch (20)", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "cron" }, { "name": "wellness" }, { "name": "sleep" }]
+}

@@ -1,0 +1,72 @@
+{
+  "name": "12 — Training Phase Transition",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 8 * * MON" }]
+        }
+      },
+      "id": "cron-phase",
+      "name": "Every Monday 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 200],
+      "notes": "Weekly check for users completing their current training phase"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL }}/api/v1/workouts/phase-transition-batch",
+        "method": "POST",
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-N8N-Secret", "value": "={{ $env.N8N_INTERNAL_SECRET }}" }
+          ]
+        },
+        "options": { "timeout": 30000 }
+      },
+      "id": "check-phase-transition",
+      "name": "Check Phase Completions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [440, 200],
+      "notes": "Returns users who completed phase_week >= total_weeks and generates next phase proposal"
+    },
+    {
+      "parameters": { "batchSize": 10, "options": {} },
+      "id": "batch-phase",
+      "name": "Batch",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [660, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.telegram_id, text: $json.transition_message, parse_mode: 'HTML', reply_markup: JSON.stringify({ inline_keyboard: [[{ text: '✅ Aceptar nueva fase', callback_data: 'phase_accept_' + $json.plan_id }, { text: '🔄 Repetir fase actual', callback_data: 'phase_repeat_' + $json.plan_id }]] }) }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "send-phase-proposal",
+      "name": "Send Phase Proposal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [880, 200]
+    }
+  ],
+  "connections": {
+    "Every Monday 08:00": {
+      "main": [[{ "node": "Check Phase Completions", "type": "main", "index": 0 }]]
+    },
+    "Check Phase Completions": {
+      "main": [[{ "node": "Batch", "type": "main", "index": 0 }]]
+    },
+    "Batch": {
+      "main": [[{ "node": "Send Phase Proposal", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "cron" }, { "name": "training" }]
+}

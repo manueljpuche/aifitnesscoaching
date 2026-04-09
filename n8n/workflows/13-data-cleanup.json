@@ -1,0 +1,99 @@
+{
+  "name": "13 — Data Cleanup & Retention",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 3 1 * *" }]
+        }
+      },
+      "id": "cron-cleanup",
+      "name": "1st of Month 03:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 200],
+      "notes": "Monthly data purge per retention policy (off-peak hours)"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL }}/api/v1/admin/data-cleanup",
+        "method": "POST",
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-N8N-Secret", "value": "={{ $env.N8N_INTERNAL_SECRET }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ conversation_retention_days: 90, ai_log_retention_days: 30, expired_preferences: true, orphaned_files: true }) }}",
+        "options": { "timeout": 120000 }
+      },
+      "id": "run-cleanup",
+      "name": "Run Data Cleanup",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [440, 200],
+      "notes": "Purge old conversations (>90d), AI logs (>30d), expired preferences, orphaned MinIO files"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            { "value1": "={{ $json.errors_count > 0 }}", "value2": true }
+          ]
+        }
+      },
+      "id": "check-errors",
+      "name": "Any Errors?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [660, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $env.ADMIN_TELEGRAM_ID, text: '⚠️ Data cleanup completed with errors:\\n' + $json.summary, parse_mode: 'HTML' }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "notify-admin-error",
+      "name": "Notify Admin (Errors)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [880, 100]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $env.ADMIN_TELEGRAM_ID, text: '✅ Monthly cleanup OK:\\n' + $json.summary, parse_mode: 'HTML' }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "notify-admin-ok",
+      "name": "Notify Admin (OK)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [880, 300]
+    }
+  ],
+  "connections": {
+    "1st of Month 03:00": {
+      "main": [[{ "node": "Run Data Cleanup", "type": "main", "index": 0 }]]
+    },
+    "Run Data Cleanup": {
+      "main": [[{ "node": "Any Errors?", "type": "main", "index": 0 }]]
+    },
+    "Any Errors?": {
+      "main": [
+        [{ "node": "Notify Admin (Errors)", "type": "main", "index": 0 }],
+        [{ "node": "Notify Admin (OK)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "cron" }, { "name": "admin" }, { "name": "maintenance" }]
+}

@@ -1,0 +1,92 @@
+{
+  "name": "15 — Temporary Restriction Expiry",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 0 * * *" }]
+        }
+      },
+      "id": "cron-expire",
+      "name": "Daily 00:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 200],
+      "notes": "Midnight check for expired temporary restrictions/preferences"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL }}/api/v1/users/expire-temporary",
+        "method": "POST",
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-N8N-Secret", "value": "={{ $env.N8N_INTERNAL_SECRET }}" }
+          ]
+        },
+        "options": { "timeout": 30000 }
+      },
+      "id": "expire-prefs",
+      "name": "Expire Temporary Restrictions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [440, 200],
+      "notes": "Clears user_preferences where is_temporary=true and expires_at < now()"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            { "value1": "={{ $json.expired_count }}", "operation": "largerThan", "value2": 0 }
+          ]
+        }
+      },
+      "id": "any-expired",
+      "name": "Any Expired?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [660, 200]
+    },
+    {
+      "parameters": { "batchSize": 20, "options": {} },
+      "id": "batch-expired",
+      "name": "Batch",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [880, 100]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.telegram_id, text: '📋 Tu restricción temporal \"' + $json.restriction_name + '\" ha expirado. Tu plan se ha actualizado automáticamente.', parse_mode: 'HTML' }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "notify-expired",
+      "name": "Notify User",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1100, 100]
+    }
+  ],
+  "connections": {
+    "Daily 00:00": {
+      "main": [[{ "node": "Expire Temporary Restrictions", "type": "main", "index": 0 }]]
+    },
+    "Expire Temporary Restrictions": {
+      "main": [[{ "node": "Any Expired?", "type": "main", "index": 0 }]]
+    },
+    "Any Expired?": {
+      "main": [
+        [{ "node": "Batch", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Batch": {
+      "main": [[{ "node": "Notify User", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "cron" }, { "name": "preferences" }]
+}

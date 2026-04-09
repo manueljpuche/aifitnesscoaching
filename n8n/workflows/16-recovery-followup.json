@@ -1,0 +1,72 @@
+{
+  "name": "16 — Recovery Followup (Sick/Injured)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 10 */3 * *" }]
+        }
+      },
+      "id": "cron-recovery",
+      "name": "Every 3 Days 10:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 200],
+      "notes": "Check on users who reported illness/injury"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL }}/api/v1/notifications/recovery-followup-batch",
+        "method": "GET",
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-N8N-Secret", "value": "={{ $env.N8N_INTERNAL_SECRET }}" }
+          ]
+        },
+        "options": { "timeout": 15000 }
+      },
+      "id": "get-recovery-batch",
+      "name": "Get Users in Recovery",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [440, 200],
+      "notes": "Returns users with active health_status = sick|injured who haven't been followed up in 3+ days"
+    },
+    {
+      "parameters": { "batchSize": 20, "options": {} },
+      "id": "batch-recovery",
+      "name": "Batch",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [660, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.telegram_id, text: $json.followup_text, parse_mode: 'HTML', reply_markup: JSON.stringify({ inline_keyboard: [[{ text: '✅ Ya estoy mejor', callback_data: 'recovery_better_' + $json.user_id }, { text: '😐 Sigo igual', callback_data: 'recovery_same_' + $json.user_id }, { text: '😟 Estoy peor', callback_data: 'recovery_worse_' + $json.user_id }]] }) }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "send-recovery-followup",
+      "name": "Send Recovery Followup",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [880, 200]
+    }
+  ],
+  "connections": {
+    "Every 3 Days 10:00": {
+      "main": [[{ "node": "Get Users in Recovery", "type": "main", "index": 0 }]]
+    },
+    "Get Users in Recovery": {
+      "main": [[{ "node": "Batch", "type": "main", "index": 0 }]]
+    },
+    "Batch": {
+      "main": [[{ "node": "Send Recovery Followup", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "cron" }, { "name": "health" }, { "name": "recovery" }]
+}

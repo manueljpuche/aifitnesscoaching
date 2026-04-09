@@ -1,0 +1,105 @@
+{
+  "name": "14 — Health Check Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "*/5 * * * *" }]
+        }
+      },
+      "id": "cron-health",
+      "name": "Every 5 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 200],
+      "notes": "Health check every 5 minutes"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL }}/health",
+        "method": "GET",
+        "options": { "timeout": 10000 },
+        "onError": "continueErrorOutput"
+      },
+      "id": "health-check",
+      "name": "GET /health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [440, 200],
+      "notes": "Check backend health, includes DB/Redis/MinIO/OpenAI status"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            { "value1": "={{ $json.status }}", "operation": "equals", "value2": "healthy" }
+          ]
+        }
+      },
+      "id": "is-healthy",
+      "name": "Healthy?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [660, 200]
+    },
+    {
+      "parameters": {},
+      "id": "noop-ok",
+      "name": "OK — No Action",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [880, 100]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $env.ADMIN_TELEGRAM_ID, text: '🔴 Backend UNHEALTHY\\nStatus: ' + ($json.status || 'unreachable') + '\\nDetails: ' + JSON.stringify($json.checks || {}), parse_mode: 'HTML' }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "alert-admin",
+      "name": "Alert Admin",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [880, 300],
+      "notes": "Notify admin via Telegram when backend is down or degraded"
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $env.ADMIN_TELEGRAM_ID, text: '🔴 Backend UNREACHABLE — connection error', parse_mode: 'HTML' }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "alert-admin-down",
+      "name": "Alert Admin (Down)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [880, 500],
+      "notes": "HTTP request failed entirely (connection refused, timeout)"
+    }
+  ],
+  "connections": {
+    "Every 5 min": {
+      "main": [[{ "node": "GET /health", "type": "main", "index": 0 }]]
+    },
+    "GET /health": {
+      "main": [
+        [{ "node": "Healthy?", "type": "main", "index": 0 }],
+        [{ "node": "Alert Admin (Down)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Healthy?": {
+      "main": [
+        [{ "node": "OK — No Action", "type": "main", "index": 0 }],
+        [{ "node": "Alert Admin", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "cron" }, { "name": "monitoring" }]
+}

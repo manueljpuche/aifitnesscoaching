@@ -1,0 +1,72 @@
+{
+  "name": "11 — Symptom Followup (3h After Report)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "*/30 * * * *" }]
+        }
+      },
+      "id": "cron-symptom",
+      "name": "Every 30 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 200],
+      "notes": "Check for symptom reports that need 3-hour followup"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL }}/api/v1/notifications/symptom-followup-batch",
+        "method": "GET",
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-N8N-Secret", "value": "={{ $env.N8N_INTERNAL_SECRET }}" }
+          ]
+        },
+        "options": { "timeout": 15000 }
+      },
+      "id": "get-symptom-followup",
+      "name": "Get Pending Symptom Followups",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [440, 200],
+      "notes": "Returns users who reported symptoms 3h ago and haven't been followed up"
+    },
+    {
+      "parameters": { "batchSize": 20, "options": {} },
+      "id": "batch-symptom",
+      "name": "Batch",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [660, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.telegram_id, text: $json.followup_text, parse_mode: 'HTML', reply_markup: JSON.stringify({ inline_keyboard: [[{ text: '😊 Mejor', callback_data: 'symptom_better_' + $json.symptom_log_id }, { text: '😐 Igual', callback_data: 'symptom_same_' + $json.symptom_log_id }, { text: '😟 Peor', callback_data: 'symptom_worse_' + $json.symptom_log_id }]] }) }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "send-symptom-followup",
+      "name": "Send Followup Question",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [880, 200]
+    }
+  ],
+  "connections": {
+    "Every 30 min": {
+      "main": [[{ "node": "Get Pending Symptom Followups", "type": "main", "index": 0 }]]
+    },
+    "Get Pending Symptom Followups": {
+      "main": [[{ "node": "Batch", "type": "main", "index": 0 }]]
+    },
+    "Batch": {
+      "main": [[{ "node": "Send Followup Question", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "cron" }, { "name": "health" }]
+}

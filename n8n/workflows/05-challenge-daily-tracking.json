@@ -1,0 +1,86 @@
+{
+  "name": "05 — Challenge Daily Tracking",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 22 * * *" }]
+        }
+      },
+      "id": "cron-daily-night",
+      "name": "Daily 22:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300],
+      "notes": "Nightly check on active challenges"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL }}/api/v1/challenges/daily-progress-batch",
+        "method": "POST",
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-N8N-Secret", "value": "={{ $env.N8N_INTERNAL_SECRET }}" }
+          ]
+        },
+        "options": { "timeout": 30000 }
+      },
+      "id": "check-challenges",
+      "name": "Check Active Challenges",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [440, 300],
+      "notes": "Backend verifies daily progress for all active user_challenges. Returns [{telegram_id, message, completed}]"
+    },
+    {
+      "parameters": { "batchSize": 20, "options": {} },
+      "id": "batch",
+      "name": "Batch (20)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.telegram_id, text: $json.message, parse_mode: 'HTML' }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "send-challenge-update",
+      "name": "Send Challenge Update",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [880, 300]
+    },
+    {
+      "parameters": { "amount": 1, "unit": "seconds" },
+      "id": "wait",
+      "name": "Wait 1s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1100, 300]
+    }
+  ],
+  "connections": {
+    "Daily 22:00": {
+      "main": [[{ "node": "Check Active Challenges", "type": "main", "index": 0 }]]
+    },
+    "Check Active Challenges": {
+      "main": [[{ "node": "Batch (20)", "type": "main", "index": 0 }]]
+    },
+    "Batch (20)": {
+      "main": [[{ "node": "Send Challenge Update", "type": "main", "index": 0 }]]
+    },
+    "Send Challenge Update": {
+      "main": [[{ "node": "Wait 1s", "type": "main", "index": 0 }]]
+    },
+    "Wait 1s": {
+      "main": [[{ "node": "Batch (20)", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "cron" }, { "name": "challenges" }]
+}

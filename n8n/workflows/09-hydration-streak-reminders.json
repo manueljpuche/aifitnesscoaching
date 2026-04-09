@@ -1,0 +1,135 @@
+{
+  "name": "09 — Hydration & Streak Reminders",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 14,18 * * *" }]
+        }
+      },
+      "id": "cron-water",
+      "name": "At 14:00 & 18:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 200],
+      "notes": "Mid-day and evening hydration check"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL }}/api/v1/notifications/hydration-batch",
+        "method": "GET",
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-N8N-Secret", "value": "={{ $env.N8N_INTERNAL_SECRET }}" }
+          ]
+        },
+        "options": { "timeout": 15000 }
+      },
+      "id": "get-hydration",
+      "name": "Get Users Below Water Goal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [440, 200],
+      "notes": "Returns users who haven't reached their water_goal_ml and have water_reminders=true"
+    },
+    {
+      "parameters": { "batchSize": 20, "options": {} },
+      "id": "batch-water",
+      "name": "Batch",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [660, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.telegram_id, text: $json.reminder_text, parse_mode: 'HTML' }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "send-water",
+      "name": "Send Water Reminder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [880, 200]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 21 * * *" }]
+        }
+      },
+      "id": "cron-streak",
+      "name": "Daily 21:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 500],
+      "notes": "End of day streak risk check"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL }}/api/v1/gamification/streak-risk-batch",
+        "method": "GET",
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-N8N-Secret", "value": "={{ $env.N8N_INTERNAL_SECRET }}" }
+          ]
+        },
+        "options": { "timeout": 15000 }
+      },
+      "id": "get-streak-risk",
+      "name": "Get Streak-at-Risk Users",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [440, 500],
+      "notes": "Returns users whose streaks will break if they don't log activity today"
+    },
+    {
+      "parameters": { "batchSize": 20, "options": {} },
+      "id": "batch-streak",
+      "name": "Batch",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [660, 500]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.telegram_id, text: $json.reminder_text, parse_mode: 'HTML' }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "send-streak-alert",
+      "name": "Send Streak Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [880, 500]
+    }
+  ],
+  "connections": {
+    "At 14:00 & 18:00": {
+      "main": [[{ "node": "Get Users Below Water Goal", "type": "main", "index": 0 }]]
+    },
+    "Get Users Below Water Goal": {
+      "main": [[{ "node": "Batch", "type": "main", "index": 0 }]]
+    },
+    "Batch": {
+      "main": [[{ "node": "Send Water Reminder", "type": "main", "index": 0 }]]
+    },
+    "Daily 21:00": {
+      "main": [[{ "node": "Get Streak-at-Risk Users", "type": "main", "index": 0 }]]
+    },
+    "Get Streak-at-Risk Users": {
+      "main": [[{ "node": "Batch", "type": "main", "index": 0 }]]
+    },
+    "Send Streak Alert": {
+      "main": []
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "cron" }, { "name": "wellness" }, { "name": "gamification" }]
+}

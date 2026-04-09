@@ -1,0 +1,86 @@
+{
+  "name": "04 — Weekly Check-in",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 20 * * 0" }]
+        }
+      },
+      "id": "cron-sunday-night",
+      "name": "Sunday 20:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300],
+      "notes": "Weekly check-in — Sunday evening"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL }}/api/v1/checkins/weekly-batch",
+        "method": "POST",
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-N8N-Secret", "value": "={{ $env.N8N_INTERNAL_SECRET }}" }
+          ]
+        },
+        "options": { "timeout": 60000 }
+      },
+      "id": "generate-checkins",
+      "name": "Generate Weekly Check-ins",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [440, 300],
+      "notes": "Backend generates weekly summaries for all active users and returns [{telegram_id, summary_text, questions}]"
+    },
+    {
+      "parameters": { "batchSize": 20, "options": {} },
+      "id": "batch-checkins",
+      "name": "Batch (20 users)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.telegram_id, text: $json.summary_text, parse_mode: 'HTML' }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "send-checkin",
+      "name": "Send Check-in Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [880, 300]
+    },
+    {
+      "parameters": { "amount": 1, "unit": "seconds" },
+      "id": "wait-rate",
+      "name": "Wait 1s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1100, 300]
+    }
+  ],
+  "connections": {
+    "Sunday 20:00": {
+      "main": [[{ "node": "Generate Weekly Check-ins", "type": "main", "index": 0 }]]
+    },
+    "Generate Weekly Check-ins": {
+      "main": [[{ "node": "Batch (20 users)", "type": "main", "index": 0 }]]
+    },
+    "Batch (20 users)": {
+      "main": [[{ "node": "Send Check-in Summary", "type": "main", "index": 0 }]]
+    },
+    "Send Check-in Summary": {
+      "main": [[{ "node": "Wait 1s", "type": "main", "index": 0 }]]
+    },
+    "Wait 1s": {
+      "main": [[{ "node": "Batch (20 users)", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "cron" }, { "name": "weekly" }, { "name": "checkins" }]
+}

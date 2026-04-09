@@ -1,0 +1,467 @@
+{
+  "name": "01 — Telegram Webhook (Main)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "telegram-webhook",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "webhook-telegram",
+      "name": "Telegram Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "telegram-webhook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "leftValue": "={{ $json.headers['x-telegram-bot-api-secret-token'] }}",
+            "operation": "equals",
+            "rightValue": "={{ $env.TELEGRAM_WEBHOOK_SECRET }}"
+          }
+        }
+      },
+      "id": "verify-hmac",
+      "name": "Verify HMAC Secret",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL }}/api/v1/auth/telegram-login",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "telegram_id",
+              "value": "={{ $json.body.message?.from?.id || $json.body.callback_query?.from?.id }}"
+            },
+            {
+              "name": "username",
+              "value": "={{ $json.body.message?.from?.username || $json.body.callback_query?.from?.username || '' }}"
+            },
+            {
+              "name": "first_name",
+              "value": "={{ $json.body.message?.from?.first_name || $json.body.callback_query?.from?.first_name || '' }}"
+            },
+            {
+              "name": "last_name",
+              "value": "={{ $json.body.message?.from?.last_name || $json.body.callback_query?.from?.last_name || '' }}"
+            },
+            {
+              "name": "language_code",
+              "value": "={{ $json.body.message?.from?.language_code || $json.body.callback_query?.from?.language_code || 'es' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "auth-login",
+      "name": "Auth — Telegram Login",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL }}/api/v1/auth/telegram-login",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ telegram_id: $json.body.message?.from?.id || $json.body.callback_query?.from?.id, username: $json.body.message?.from?.username || $json.body.callback_query?.from?.username || '', first_name: $json.body.message?.from?.first_name || $json.body.callback_query?.from?.first_name || '', last_name: $json.body.message?.from?.last_name || $json.body.callback_query?.from?.last_name || '', language_code: $json.body.message?.from?.language_code || $json.body.callback_query?.from?.language_code || 'es' }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "auth-login-node",
+      "name": "Auth Login",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [640, 300],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $('Telegram Webhook').item.json.body.update_id }}",
+              "operation": "exists"
+            }
+          ]
+        },
+        "combineOperation": "any"
+      },
+      "id": "dedup-check",
+      "name": "Dedup via Redis",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [530, 300],
+      "notes": "SET NX telegram_update:{update_id} with TTL 3600. Skip if already exists."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "leftValue": "={{ $('Telegram Webhook').item.json.body.message !== undefined }}",
+            "operation": "equals",
+            "rightValue": true
+          }
+        }
+      },
+      "id": "route-type",
+      "name": "Message or Callback?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [860, 300],
+      "notes": "Routes to message processing or callback handling"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $('Telegram Webhook').item.json.body.message.voice }}",
+              "operation": "exists"
+            }
+          ]
+        }
+      },
+      "id": "check-voice",
+      "name": "Has Voice?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1080, 180]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/getFile",
+        "qs": {
+          "file_id": "={{ $('Telegram Webhook').item.json.body.message.voice.file_id }}"
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "get-voice-file",
+      "name": "Get Voice File Path",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1300, 60]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/file/bot{{ $env.TELEGRAM_BOT_TOKEN }}/{{ $json.result.file_path }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "download-voice",
+      "name": "Download Voice File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1520, 60]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL }}/api/v1/ai/transcribe",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "file",
+              "value": "={{ $binary.data }}"
+            }
+          ]
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $('Auth — Telegram Login').item.json.access_token }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "transcribe-voice",
+      "name": "Transcribe Audio (Whisper)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1740, 60]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $('Telegram Webhook').item.json.body.message.photo }}",
+              "operation": "exists"
+            }
+          ]
+        }
+      },
+      "id": "check-photo",
+      "name": "Has Photo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1080, 340]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL }}/api/v1/ai/message",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $json.text || $('Telegram Webhook').item.json.body.message.text || $('Telegram Webhook').item.json.body.message.caption || '' }) }}",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $('Auth — Telegram Login').item.json.access_token }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "process-message",
+      "name": "Process Message (AI)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1960, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.intent }}",
+              "values": ["craving", "restaurant_meal", "express_workout", "generate_plan", "meal_prep"]
+            }
+          ]
+        }
+      },
+      "id": "needs-feedback-buttons",
+      "name": "Needs Feedback Buttons?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2180, 300],
+      "notes": "Certain intents get inline feedback buttons"
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $('Telegram Webhook').item.json.body.message?.chat?.id || $('Telegram Webhook').item.json.body.callback_query?.message?.chat?.id, text: $json.response, parse_mode: 'HTML', reply_markup: { inline_keyboard: [[{ text: '✅ Perfecto', callback_data: 'feedback:accept' }, { text: '👍 Bien', callback_data: 'feedback:ok' }], [{ text: '❌ No me gusta', callback_data: 'feedback:reject' }, { text: '🔄 Dame otra', callback_data: 'feedback:retry' }]] } }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "send-with-buttons",
+      "name": "Send with Feedback Buttons",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2400, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $('Telegram Webhook').item.json.body.message?.chat?.id || $('Telegram Webhook').item.json.body.callback_query?.message?.chat?.id, text: $json.response, parse_mode: 'HTML' }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "send-plain",
+      "name": "Send Plain Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2400, 400]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL }}/api/v1/ai/feedback",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ suggestion_type: 'inline_feedback', accepted: $('Telegram Webhook').item.json.body.callback_query.data.includes('accept') || $('Telegram Webhook').item.json.body.callback_query.data.includes('ok') }) }}",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $('Auth — Telegram Login').item.json.access_token }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "handle-callback",
+      "name": "Handle Callback (Feedback)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1080, 500]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $('Telegram Webhook').item.json.body.callback_query.message.chat.id, text: $('Telegram Webhook').item.json.body.callback_query.data.includes('reject') ? 'Entendido. ¿Qué preferirías en su lugar?' : ($('Telegram Webhook').item.json.body.callback_query.data.includes('retry') ? 'Buscando otra opción... 🔄' : '¡Genial! 👍') }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "callback-response",
+      "name": "Callback Response to User",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1300, 500]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-ok",
+      "name": "Respond 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2600, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"ok\": true}",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "id": "respond-401",
+      "name": "Respond 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [420, 500],
+      "notes": "HMAC verification failed"
+    }
+  ],
+  "connections": {
+    "Telegram Webhook": {
+      "main": [
+        [{ "node": "Verify HMAC Secret", "type": "main", "index": 0 }]
+      ]
+    },
+    "Verify HMAC Secret": {
+      "main": [
+        [{ "node": "Auth — Telegram Login", "type": "main", "index": 0 }],
+        [{ "node": "Respond 401", "type": "main", "index": 0 }]
+      ]
+    },
+    "Auth — Telegram Login": {
+      "main": [
+        [{ "node": "Message or Callback?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Message or Callback?": {
+      "main": [
+        [{ "node": "Has Voice?", "type": "main", "index": 0 }],
+        [{ "node": "Handle Callback (Feedback)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Has Voice?": {
+      "main": [
+        [{ "node": "Get Voice File Path", "type": "main", "index": 0 }],
+        [{ "node": "Has Photo?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Voice File Path": {
+      "main": [
+        [{ "node": "Download Voice File", "type": "main", "index": 0 }]
+      ]
+    },
+    "Download Voice File": {
+      "main": [
+        [{ "node": "Transcribe Audio (Whisper)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Transcribe Audio (Whisper)": {
+      "main": [
+        [{ "node": "Process Message (AI)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Has Photo?": {
+      "main": [
+        [{ "node": "Process Message (AI)", "type": "main", "index": 0 }],
+        [{ "node": "Process Message (AI)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Process Message (AI)": {
+      "main": [
+        [{ "node": "Needs Feedback Buttons?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Needs Feedback Buttons?": {
+      "main": [
+        [{ "node": "Send with Feedback Buttons", "type": "main", "index": 0 }],
+        [{ "node": "Send Plain Message", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send with Feedback Buttons": {
+      "main": [
+        [{ "node": "Respond 200 OK", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Plain Message": {
+      "main": [
+        [{ "node": "Respond 200 OK", "type": "main", "index": 0 }]
+      ]
+    },
+    "Handle Callback (Feedback)": {
+      "main": [
+        [{ "node": "Callback Response to User", "type": "main", "index": 0 }]
+      ]
+    },
+    "Callback Response to User": {
+      "main": [
+        [{ "node": "Respond 200 OK", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    { "name": "telegram" },
+    { "name": "webhook" },
+    { "name": "main" }
+  ]
+}

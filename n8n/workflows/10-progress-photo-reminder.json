@@ -1,0 +1,72 @@
+{
+  "name": "10 — Progress Photo Reminder (Monthly)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 10 1 * *" }]
+        }
+      },
+      "id": "cron-photo",
+      "name": "1st of Month 10:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 200],
+      "notes": "Monthly progress photo reminder (every 4 weeks approx)"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL }}/api/v1/notifications/progress-photo-batch",
+        "method": "GET",
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-N8N-Secret", "value": "={{ $env.N8N_INTERNAL_SECRET }}" }
+          ]
+        },
+        "options": { "timeout": 15000 }
+      },
+      "id": "get-photo-batch",
+      "name": "Get Users Due Progress Photo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [440, 200],
+      "notes": "Returns users whose last progress_photo is > 28 days ago"
+    },
+    {
+      "parameters": { "batchSize": 20, "options": {} },
+      "id": "batch-photo",
+      "name": "Batch",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [660, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.telegram_id, text: '📸 ¡Es hora de tu foto de progreso mensual!\\nEnvíame una foto para actualizar tu seguimiento corporal. Así podremos comparar con fotos anteriores y ver tu evolución.', parse_mode: 'HTML' }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "send-photo-reminder",
+      "name": "Send Photo Reminder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [880, 200]
+    }
+  ],
+  "connections": {
+    "1st of Month 10:00": {
+      "main": [[{ "node": "Get Users Due Progress Photo", "type": "main", "index": 0 }]]
+    },
+    "Get Users Due Progress Photo": {
+      "main": [[{ "node": "Batch", "type": "main", "index": 0 }]]
+    },
+    "Batch": {
+      "main": [[{ "node": "Send Photo Reminder", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "cron" }, { "name": "progress" }]
+}
